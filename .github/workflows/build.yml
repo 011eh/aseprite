@@ -68,6 +68,54 @@ jobs:
         run: |
           cmake --build build --target aseprite
 
+      - name: Package OpenSSL runtime DLLs
+        shell: pwsh
+        run: |
+          $binDir = Join-Path $env:GITHUB_WORKSPACE 'build\bin'
+          $dllNames = @('libcrypto-3-x64.dll')
+
+          function Get-SearchRoots {
+            @(
+              $env:SKIA_DIR,
+              "$env:ProgramFiles\OpenSSL-Win64\bin",
+              "$env:ProgramFiles\OpenSSL\bin",
+              "$env:ProgramFiles\Git\mingw64\bin",
+              "${env:ProgramFiles(x86)}\OpenSSL-Win32\bin"
+            ) | Where-Object { $_ -and (Test-Path $_) }
+          }
+
+          function Find-RuntimeDll {
+            param(
+              [string] $Name,
+              [string[]] $Roots
+            )
+
+            Get-ChildItem -Path $Roots -Filter $Name -Recurse -File -ErrorAction SilentlyContinue |
+              Select-Object -First 1
+          }
+
+          $searchRoots = Get-SearchRoots
+          $missing = @()
+          foreach ($dllName in $dllNames) {
+            if (-not (Find-RuntimeDll -Name $dllName -Roots $searchRoots)) {
+              $missing += $dllName
+            }
+          }
+
+          if ($missing.Count -gt 0) {
+            choco install openssl.light --yes --no-progress
+            $searchRoots = Get-SearchRoots
+          }
+
+          foreach ($dllName in $dllNames) {
+            $dll = Find-RuntimeDll -Name $dllName -Roots $searchRoots
+            if (-not $dll) {
+              throw "Unable to find $dllName after installing OpenSSL"
+            }
+
+            Copy-Item -LiteralPath $dll.FullName -Destination $binDir -Force
+          }
+
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
@@ -77,3 +125,4 @@ jobs:
             build/bin/data
             build/bin/aseprite.exe
             build/bin/icudtl.dat
+            build/bin/libcrypto-3-x64.dll
