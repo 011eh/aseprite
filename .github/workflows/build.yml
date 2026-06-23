@@ -41,8 +41,10 @@ jobs:
         else
           export enable_ccache=on
         fi
-        curl -L https://github.com/blueloveTH/aseprite/releases/download/v0.01/skia.zip --output skia.zip
+        curl -L https://github.com/aseprite/skia/releases/download/m148-a29c8d23be/Skia-Windows-Release-x64.zip --output skia.zip
         7z x skia.zip
+        # Official Skia archive extracts to skia-m148/; cmake expects ./skia
+        mv skia-m148 skia
         cmake -S . -B build -G Ninja \
           -DCMAKE_BUILD_TYPE=${{ matrix.build_type }} \
           -DENABLE_UI=${{ matrix.enable_ui }} \
