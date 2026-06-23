@@ -1,67 +1,79 @@
 name: build
-on: [push, pull_request]
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
 jobs:
-  build:
-    runs-on: ${{ matrix.os }}
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [windows-latest]
-        build_type: [Release]
-        enable_ui: [on]
-        include:
-          - os: windows-latest
-            build_type: Release
-            enable_ui: on
+  windows:
+    name: Windows RelWithDebInfo
+    runs-on: windows-latest
+    timeout-minutes: 60
+
+    env:
+      BUILD_TYPE: RelWithDebInfo
+      SKIA_BUILD: Release
+      SKIA_CPU: x64
+
     steps:
-    - uses: actions/checkout@v4
-      with:
-        submodules: 'recursive'
-    - name: ccache
-      uses: hendrikmuhs/ccache-action@v1
-      if: runner.os == 'Linux'
-      with:
-        key: ${{ matrix.os }}-${{ matrix.enable_ui }}
-    - uses: seanmiddleditch/gha-setup-ninja@master
-    - uses: ilammy/msvc-dev-cmd@v1
-      if: runner.os == 'Windows'
-    - name: Install Dependencies
-      shell: bash
-      run: |
-        if [[ "${{ runner.os }}" == "Linux" ]] ; then
-          sudo apt-get update -qq
-          sudo apt-get install -y \
-            libx11-dev libxcursor-dev libxi-dev
-        fi
-    - name: Generating Makefiles
-      shell: bash
-      run: |
-        if [[ "${{ runner.os }}" == "Windows" ]] ; then
-          export enable_ccache=off
-          export repo_dir="$(pwd -W 2>/dev/null || pwd)"
-        else
-          export enable_ccache=on
-          export repo_dir="$PWD"
-        fi
-        export skia_dir="$repo_dir/skia"
-        export skia_library_dir="$skia_dir/out/Release-x64"
-        curl -L https://github.com/aseprite/skia/releases/download/m148-a29c8d23be/Skia-Windows-Release-x64.zip --output skia.zip
-        mkdir -p skia && 7z x skia.zip -oskia
-        cmake -S . -B build -G Ninja \
-          -DCMAKE_BUILD_TYPE=${{ matrix.build_type }} \
-          -DENABLE_UI=${{ matrix.enable_ui }} \
-          -DENABLE_CCACHE=$enable_ccache \
-          -DLAF_BACKEND=skia \
-          -DSKIA_DIR="$skia_dir" \
-          -DSKIA_LIBRARY_DIR="$skia_library_dir" \
-          -DSKIA_LIBRARY="$skia_library_dir/skia.lib"
-    - name: Compiling
-      shell: bash
-      run: |
-        cd build && ninja
-    - uses: actions/upload-artifact@v4
-      with:
-        name: aseprite
-        path: |
-          D:/a/aseprite/aseprite/build/bin/data
-          D:/a/aseprite/aseprite/build/bin/aseprite.exe
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install Ninja
+        uses: aseprite/get-ninja@main
+
+      - name: Set up MSVC
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+
+      - name: Download Skia
+        shell: pwsh
+        run: |
+          $skiaTag = (Get-Content -Raw laf/misc/skia-tag.txt).Trim()
+          $skiaVersion = $skiaTag.Split('-')[0]
+          $skiaUrl = "https://github.com/aseprite/skia/releases/download/$skiaTag/Skia-Windows-$env:SKIA_BUILD-$env:SKIA_CPU.zip"
+          $skiaZip = Join-Path $env:RUNNER_TEMP 'skia.zip'
+          $skiaDir = Join-Path $env:GITHUB_WORKSPACE ".deps\skia-$skiaVersion"
+
+          New-Item -ItemType Directory -Force -Path $skiaDir | Out-Null
+          curl.exe --ssl-revoke-best-effort -L -o $skiaZip $skiaUrl
+          7z x $skiaZip "-o$skiaDir" -y
+
+          $skiaLibraryDir = Join-Path $skiaDir "out\$env:SKIA_BUILD-$env:SKIA_CPU"
+
+          "SKIA_DIR=$skiaDir" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "SKIA_LIBRARY_DIR=$skiaLibraryDir" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "SKIA_LIBRARY=$skiaLibraryDir\skia.lib" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+      - name: Configure
+        shell: pwsh
+        run: |
+          cmake -S . -B build -G Ninja `
+            -DCMAKE_BUILD_TYPE="$env:BUILD_TYPE" `
+            -DENABLE_CCACHE=off `
+            -DLAF_BACKEND=skia `
+            -DSKIA_DIR="$env:SKIA_DIR" `
+            -DSKIA_LIBRARY_DIR="$env:SKIA_LIBRARY_DIR" `
+            -DSKIA_LIBRARY="$env:SKIA_LIBRARY"
+
+      - name: Build
+        shell: pwsh
+        run: |
+          cmake --build build --target aseprite
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: aseprite-windows-${{ env.BUILD_TYPE }}
+          if-no-files-found: error
+          path: |
+            build/bin/data
+            build/bin/aseprite.exe
+            build/bin/icudtl.dat
