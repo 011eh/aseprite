@@ -38,9 +38,13 @@ jobs:
       run: |
         if [[ "${{ runner.os }}" == "Windows" ]] ; then
           export enable_ccache=off
+          export repo_dir="$(pwd -W 2>/dev/null || pwd)"
         else
           export enable_ccache=on
+          export repo_dir="$PWD"
         fi
+        export skia_dir="$repo_dir/skia"
+        export skia_library_dir="$skia_dir/out/Release-x64"
         curl -L https://github.com/aseprite/skia/releases/download/m148-a29c8d23be/Skia-Windows-Release-x64.zip --output skia.zip
         mkdir -p skia && 7z x skia.zip -oskia
         cmake -S . -B build -G Ninja \
@@ -48,9 +52,9 @@ jobs:
           -DENABLE_UI=${{ matrix.enable_ui }} \
           -DENABLE_CCACHE=$enable_ccache \
           -DLAF_BACKEND=skia \
-          -DSKIA_DIR=./skia \
-          -DSKIA_LIBRARY_DIR=./skia/out/Release-x64 \
-          -DSKIA_LIBRARY=./skia/out/Release-x64/skia.lib
+          -DSKIA_DIR="$skia_dir" \
+          -DSKIA_LIBRARY_DIR="$skia_library_dir" \
+          -DSKIA_LIBRARY="$skia_library_dir/skia.lib"
     - name: Compiling
       shell: bash
       run: |
